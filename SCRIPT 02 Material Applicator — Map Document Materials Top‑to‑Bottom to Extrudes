@@ -1,0 +1,67 @@
+# -*- coding: utf-8 -*-
+import vs
+
+# Settings
+TARGET_LAYER = 'ZZ_Material_Vertical_Stack'   # adjust if your blocks are on another layer
+ONLY_ON_THIS_LAYER = True                     # set False to scan all layers
+APPLY_LIMIT = None                            # None = no cap; or set an integer
+
+def list_document_material_names():
+    # Resource type 19 = Materials in the current document
+    list_id, count = vs.BuildResourceList(19, 0, '')
+    names = []
+    i = 1
+    while i <= count:
+        names.append(vs.GetNameFromResourceList(list_id, i))
+        i += 1
+    return names
+
+def collect_extrudes_on_layer(layer_name=None):
+    # Collect extrusions (XTRD) and sort top->bottom by Y center
+    items = []
+    def _add(h): items.append(h)
+    crit = "(T=XTRD)" if layer_name is None else "((T=XTRD) & (L='{}'))".format(layer_name)
+    vs.ForEachObject(_add, crit)
+
+    def y_center(h):
+        try:
+            bx, by, tx, ty = vs.GetBBox(h)
+            return (by + ty) / 2.0
+        except:
+            b = vs.GetBBox(h)
+            return b[1] if isinstance(b, (tuple, list)) and len(b) >= 2 else 0.0
+
+    items.sort(key=y_center, reverse=True)
+    return items
+
+def main():
+    mat_names = list_document_material_names()
+    if len(mat_names) == 0:
+        vs.AlrtDialog("No Materials found in this document.\nImport or create Materials, then run again.")
+        return
+
+    extrudes = collect_extrudes_on_layer(TARGET_LAYER) if ONLY_ON_THIS_LAYER else collect_extrudes_on_layer(None)
+    if len(extrudes) == 0:
+        vs.AlrtDialog("No extrusions (XTRD) found.\nCheck layer name and that the blocks exist.")
+        return
+
+    to_apply = min(len(extrudes), len(mat_names))
+    if APPLY_LIMIT is not None:
+        to_apply = min(to_apply, APPLY_LIMIT)
+
+    applied = 0
+    for i in range(to_apply):
+        h_obj = extrudes[i]
+        mname = mat_names[i]
+        h_mat = vs.GetObject(mname)
+        if vs.SetObjMaterialHandle(h_obj, h_mat):
+            applied += 1
+        else:
+            vs.Message("Failed applying material: {}".format(mname))
+
+    vs.ReDraw()
+    vs.AlrtDialog("Materials available: {}\nExtrusions found: {}\nAssignments done: {}".format(
+        len(mat_names), len(extrudes), applied
+    ))
+
+main()
